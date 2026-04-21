@@ -39,6 +39,8 @@ import "./settings/mail/mailTestModal";
 import "./settings/sync/importCollectionsReviewModal";
 import "./records/recordSummary";
 import "./records/recordsSearchbar";
+import "./records/collectionActionJobModal";
+import "./records/recordsActionsBar";
 import "./records/recordFileThumb";
 import "./records/recordFilePickerModal";
 import "./records/recordsPickerModal";

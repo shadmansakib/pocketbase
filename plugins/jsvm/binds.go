@@ -146,6 +146,47 @@ func cronBinds(app core.App, loader *goja.Runtime, executors *vmsPool) {
 	}
 }
 
+func collectionActionBinds(app core.App, loader *goja.Runtime, executors *vmsPool) {
+	collectionActionAdd := func(definition goja.Value, handler goja.Value) {
+		action, err := parseCollectionActionDefinition(definition)
+		if err != nil {
+			panic("[collectionActionAdd] failed to parse action definition: " + err.Error())
+		}
+
+		wrappedHandler, err := wrapCollectionActionHandler(executors, handler)
+		if err != nil {
+			panic("[collectionActionAdd] failed to wrap handler: " + err.Error())
+		}
+
+		action.Handler = wrappedHandler
+
+		if err := app.CollectionActions().Add(action); err != nil {
+			panic("[collectionActionAdd] failed to register action " + action.Name + ": " + err.Error())
+		}
+	}
+
+	collectionActionRemove := func(name string) {
+		app.CollectionActions().Remove(name)
+	}
+
+	loader.Set("collectionActionAdd", collectionActionAdd)
+	loader.Set("collectionActionRemove", collectionActionRemove)
+
+	oldFactory := executors.factory
+	executors.factory = func() *goja.Runtime {
+		vm := oldFactory()
+
+		vm.Set("collectionActionAdd", collectionActionAdd)
+		vm.Set("collectionActionRemove", collectionActionRemove)
+
+		return vm
+	}
+	for _, item := range executors.items {
+		item.vm.Set("collectionActionAdd", collectionActionAdd)
+		item.vm.Set("collectionActionRemove", collectionActionRemove)
+	}
+}
+
 func routerBinds(app core.App, loader *goja.Runtime, executors *vmsPool) {
 	loader.Set("routerAdd", func(method string, path string, handler goja.Value, middlewares ...goja.Value) {
 		wrappedMiddlewares, err := wrapMiddlewares(executors, middlewares...)
@@ -210,6 +251,93 @@ func wrapHandlerFunc(executors *vmsPool, handler goja.Value) (func(*core.Request
 	default:
 		return nil, errors.New("unsupported goja handler type")
 	}
+}
+
+func wrapCollectionActionHandler(executors *vmsPool, handler goja.Value) (func(*core.CollectionActionRequestEvent) error, error) {
+	if handler == nil {
+		return nil, errors.New("handler must be non-nil")
+	}
+
+	switch h := handler.Export().(type) {
+	case func(*core.CollectionActionRequestEvent) error:
+		return h, nil
+	default:
+		pr := goja.MustCompile(defaultScriptPath, "{("+handler.String()+").apply(undefined, __args)}", true)
+
+		wrappedHandler := func(e *core.CollectionActionRequestEvent) error {
+			return executors.run(func(executor *goja.Runtime) error {
+				executor.Set("$app", e.App)
+				executor.Set("__args", []any{e})
+				res, err := executor.RunProgram(pr)
+				executor.Set("__args", goja.Undefined())
+
+				if resErr := checkGojaValueForError(e.App, res); resErr != nil {
+					return resErr
+				}
+
+				return normalizeException(err)
+			})
+		}
+
+		return wrappedHandler, nil
+	}
+}
+
+func parseCollectionActionDefinition(definition goja.Value) (*core.CollectionAction, error) {
+	if definition == nil {
+		return nil, errors.New("definition must be non-nil")
+	}
+
+	raw := definition.Export()
+	defMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil, errors.New("definition must be an object")
+	}
+
+	action := &core.CollectionAction{
+		Name:               cast.ToString(defMap["name"]),
+		Label:              cast.ToString(defMap["label"]),
+		Description:        cast.ToString(defMap["description"]),
+		Icon:               cast.ToString(defMap["icon"]),
+		Order:              cast.ToInt(defMap["order"]),
+		Collections:        cast.ToStringSlice(defMap["collections"]),
+		ExcludeCollections: cast.ToStringSlice(defMap["excludeCollections"]),
+		SelectionRequired:  true,
+		MinSelection:       1,
+		LoadRecords:        true,
+		ClearSelection:     true,
+		ReloadRecords:      true,
+		ConfirmText:        cast.ToString(defMap["confirmText"]),
+		Variant:            cast.ToString(defMap["variant"]),
+		ExecutionMode:      core.CollectionActionExecutionMode(cast.ToString(defMap["executionMode"])),
+	}
+
+	hasMinSelection := false
+	if v, ok := defMap["selectionRequired"]; ok {
+		action.SelectionRequired = cast.ToBool(v)
+	}
+	if v, ok := defMap["minSelection"]; ok {
+		action.MinSelection = cast.ToInt(v)
+		hasMinSelection = true
+	}
+	if v, ok := defMap["maxSelection"]; ok {
+		action.MaxSelection = cast.ToInt(v)
+	}
+	if v, ok := defMap["loadRecords"]; ok {
+		action.LoadRecords = cast.ToBool(v)
+	}
+	if v, ok := defMap["clearSelection"]; ok {
+		action.ClearSelection = cast.ToBool(v)
+	}
+	if v, ok := defMap["reloadRecords"]; ok {
+		action.ReloadRecords = cast.ToBool(v)
+	}
+
+	if !action.SelectionRequired && !hasMinSelection {
+		action.MinSelection = 0
+	}
+
+	return action, nil
 }
 
 type gojaHookHandler struct {

@@ -323,6 +323,7 @@ func (p *plugin) registerHooks() error {
 	sharedBinds(loader)
 	hooksBinds(p.app, loader, executors)
 	cronBinds(p.app, loader, executors)
+	collectionActionBinds(p.app, loader, executors)
 	routerBinds(p.app, loader, executors)
 
 	for file, content := range files {

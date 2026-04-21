@@ -62,6 +62,52 @@ declare function cronAdd(
 declare function cronRemove(jobId: string): void;
 
 // -------------------------------------------------------------------
+// collectionActionBinds
+// -------------------------------------------------------------------
+
+/**
+ * CollectionActionAdd registers a new collection admin action.
+ *
+ * Example:
+ *
+ * ` + "```" + `js
+ * collectionActionAdd({
+ *   name: "publish",
+ *   label: "Publish selected records",
+ *   collections: ["articles"],
+ * }, (e) => {
+ *   for (const record of e.records) {
+ *     record.set("status", "published")
+ *     e.app.save(record)
+ *   }
+ * })
+ * ` + "```" + `
+ *
+ * _Note that this method is available only in pb_hooks context._
+ *
+ * @group PocketBase
+ */
+declare function collectionActionAdd(
+  definition: core.CollectionActionDefinition,
+  handler: (e: core.CollectionActionRequestEvent) => void,
+): void;
+
+/**
+ * CollectionActionRemove removes a previously registered collection admin action.
+ *
+ * Example:
+ *
+ * ` + "```" + `js
+ * collectionActionRemove("publish")
+ * ` + "```" + `
+ *
+ * _Note that this method is available only in pb_hooks context._
+ *
+ * @group PocketBase
+ */
+declare function collectionActionRemove(name: string): void;
+
+// -------------------------------------------------------------------
 // routerBinds
 // -------------------------------------------------------------------
 

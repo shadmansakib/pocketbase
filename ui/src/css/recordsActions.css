@@ -1,0 +1,166 @@
+.records-actions-wrapper {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    margin: 0 0 var(--baseSpacing);
+    padding: 0;
+}
+
+.records-actions-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--baseSpacing);
+    justify-content: space-between;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--baseAltColor);
+    border-radius: var(--baseBorderRadius);
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--baseAltColor) 45%, transparent), transparent),
+        var(--baseColor);
+    box-shadow: var(--baseShadow);
+}
+
+.records-actions-summary {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    white-space: nowrap;
+}
+
+.records-actions-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+    min-width: min(100%, 42rem);
+}
+
+.records-actions-job-indicator {
+    width: 2.2rem;
+    height: 2.2rem;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--baseAltColor);
+    background: color-mix(in srgb, var(--baseAltColor) 22%, transparent);
+    color: var(--txtHintColor);
+    position: relative;
+}
+
+.records-actions-job-indicator::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    border: 1px solid transparent;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primaryColor) 45%, transparent);
+    transition: box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.records-actions-job-indicator.job-running,
+.records-actions-job-indicator.job-queued {
+    color: var(--primaryColor);
+    border-color: color-mix(in srgb, var(--primaryColor) 30%, var(--baseAltColor));
+}
+
+.records-actions-job-indicator.job-running::after,
+.records-actions-job-indicator.job-queued::after {
+    border-color: color-mix(in srgb, var(--primaryColor) 30%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primaryColor) 10%, transparent);
+}
+
+.records-actions-job-indicator.is-loading {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primaryColor) 8%, transparent);
+}
+
+.collection-action-job-titlewrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.collection-action-job-subtitle {
+    font-size: 0.78rem;
+    opacity: 0.8;
+}
+
+.collection-action-job-card {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.collection-action-job-statusrow,
+.collection-action-job-progress-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.collection-action-job-progress {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.collection-action-job-progressbar {
+    height: 0.6rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--baseAltColor) 60%, transparent);
+}
+
+.collection-action-job-progressbar-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--primaryColor), color-mix(in srgb, var(--primaryColor) 55%, var(--successColor)));
+    transition: width 220ms ease;
+}
+
+.collection-action-job-message {
+    min-height: 1.25rem;
+}
+
+.collection-action-job-outcome .field-help {
+    margin: 0;
+}
+
+.collection-action-job-footnote {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-top: 0.25rem;
+}
+
+.records-actions-select {
+    flex: 1 1 auto;
+    min-width: 16rem;
+}
+
+.records-actions-go,
+.records-actions-reset {
+    flex: 0 0 auto;
+}
+
+@media (max-width: 760px) {
+    .records-actions-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .records-actions-controls {
+        flex-direction: column;
+        align-items: stretch;
+        min-width: 0;
+        margin-left: 0;
+    }
+
+    .records-actions-select {
+        min-width: 0;
+    }
+
+    .records-actions-go,
+    .records-actions-reset {
+        width: 100%;
+    }
+}

@@ -79,6 +79,7 @@ type BaseApp struct {
 	settings            *Settings
 	subscriptionsBroker *subscriptions.Broker
 	logger              *slog.Logger
+	collectionActions   *CollectionActionRegistry
 	concurrentDB        dbx.Builder
 	nonconcurrentDB     dbx.Builder
 	auxConcurrentDB     dbx.Builder
@@ -201,6 +202,7 @@ func NewBaseApp(config BaseAppConfig) *BaseApp {
 		store:               store.New[string, any](nil),
 		cron:                cron.New(),
 		subscriptionsBroker: subscriptions.NewBroker(),
+		collectionActions:   NewCollectionActionRegistry(),
 		config:              &config,
 	}
 
@@ -825,6 +827,14 @@ func (app *BaseApp) OnBackupRestore() *hook.Hook[*BackupEvent] {
 	return app.onBackupRestore
 }
 
+// -------------------------------------------------------------------
+// Collection action registry
+// -------------------------------------------------------------------
+
+func (app *BaseApp) CollectionActions() *CollectionActionRegistry {
+	return app.collectionActions
+}
+
 // ---------------------------------------------------------------
 
 func (app *BaseApp) OnModelCreate(tags ...string) *hook.TaggedHook[*ModelEvent] {
@@ -1374,6 +1384,7 @@ func (app *BaseApp) registerBaseHooks() {
 	})
 
 	app.registerSettingsHooks()
+	app.registerCollectionActionHooks()
 	app.registerAutobackupHooks()
 	app.registerCollectionHooks()
 	app.registerRecordHooks()

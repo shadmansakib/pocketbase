@@ -18,6 +18,7 @@ export function pageCollections(route) {
         filter: route.query[FILTER_QUERY_KEY]?.[0] || "",
         totalCount: 0,
         isTotalCountLoading: false,
+        bulkSelected: {},
     });
 
     async function loadTotalCount() {
@@ -51,6 +52,7 @@ export function pageCollections(route) {
     }
 
     function refreshRecordsList() {
+        pageData.bulkSelected = {};
         pageData.reset = Date.now();
     }
 
@@ -69,6 +71,7 @@ export function pageCollections(route) {
                 if (oldVal != newVal) {
                     pageData.filter = "";
                     pageData.sort = "";
+                    pageData.bulkSelected = {};
                 }
 
                 app.utils.replaceHashQueryParams({
@@ -90,6 +93,8 @@ export function pageCollections(route) {
                 if (!oldVal) {
                     return;
                 }
+
+                pageData.bulkSelected = {};
 
                 app.utils.replaceHashQueryParams({
                     [FILTER_QUERY_KEY]: pageData.filter || null,
@@ -304,6 +309,15 @@ export function pageCollections(route) {
                 value: () => pageData.filter,
                 onsubmit: (newFilter) => (pageData.filter = newFilter),
             }),
+            app.components.recordsActionsBar({
+                hidden: () => !app.store.activeCollection?.id,
+                collection: () => app.store.activeCollection,
+                bulkSelected: () => pageData.bulkSelected,
+                onbulkselectchange: (selected) => {
+                    pageData.bulkSelected = selected;
+                },
+                onrefresh: () => refreshRecordsList(),
+            }),
             app.components.recordsList({
                 className: "m-t-sm",
                 reset: () => pageData.reset,
@@ -311,12 +325,17 @@ export function pageCollections(route) {
                 collection: () => app.store.activeCollection,
                 filter: () => pageData.filter,
                 sort: () => pageData.sort,
+                bulkSelected: () => pageData.bulkSelected,
+                onbulkselectchange: (selected) => {
+                    pageData.bulkSelected = selected;
+                },
                 onselect: (record) => {
                     pageData.activeRecordIdOrModel = record;
                 },
                 onchange: (newFilter, newSort) => {
                     pageData.filter = newFilter;
                     pageData.sort = newSort;
+                    pageData.bulkSelected = {};
                 },
             }),
             t.footer(

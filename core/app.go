@@ -381,6 +381,9 @@ type App interface {
 	// DeleteOldLogs delete all logs that are created before createdBefore.
 	DeleteOldLogs(createdBefore time.Time) error
 
+	// CollectionActions returns the collection action registry.
+	CollectionActions() *CollectionActionRegistry
+
 	// ---------------------------------------------------------------
 
 	// CollectionQuery returns a new Collection select query.

@@ -31,6 +31,7 @@ window.app.components.recordsList = function(propsArg = {}) {
         filter: "",
         sort: "",
         reset: undefined,
+        bulkSelected: {},
         // ---
         rid: undefined,
         id: undefined,
@@ -38,6 +39,7 @@ window.app.components.recordsList = function(propsArg = {}) {
         className: "",
         onchange: (newFilter, newSort) => {},
         onselect: (record) => {},
+        onbulkselectchange: (selected) => {},
     });
 
     const watchers = app.utils.extendStore(props, propsArg);
@@ -47,13 +49,12 @@ window.app.components.recordsList = function(propsArg = {}) {
         records: [],
         lastPage: 0,
         lastTotalItems: 0,
-        bulkSelected: {},
         columnsPreferences: {},
         get canLoadMore() {
             return data.lastTotalItems >= perPage;
         },
         get totalSelected() {
-            return Object.keys(data.bulkSelected).length;
+            return Object.keys(props.bulkSelected || {}).length;
         },
         get areAllSelected() {
             return data.records.length && data.records.length == data.totalSelected;
@@ -70,7 +71,6 @@ window.app.components.recordsList = function(propsArg = {}) {
         data.records = [];
         data.lastPage = 0;
         data.lastTotalItems = 0;
-        data.bulkSelected = {};
     }
 
     function triggerOnchange() {
@@ -157,6 +157,10 @@ window.app.components.recordsList = function(propsArg = {}) {
         }
     }
 
+    function emitBulkSelected(selected) {
+        props.onbulkselectchange?.(selected);
+    }
+
     function selectAll(state = true) {
         // note: always assign a new object to trigger the getter's Object.keys
         const selected = {};
@@ -165,59 +169,7 @@ window.app.components.recordsList = function(propsArg = {}) {
                 selected[record.id] = record;
             }
         }
-        data.bulkSelected = selected;
-    }
-
-    function downloadSelected() {
-        const selected = JSON.parse(JSON.stringify(Object.values(data.bulkSelected)));
-        if (!selected.length) {
-            return; // nothing to download
-        }
-
-        // unset expand
-        for (const record of selected) {
-            if (record.expand) {
-                delete record.expand;
-            }
-        }
-
-        if (selected.length == 1) {
-            return app.utils.downloadJSON(selected[0], props.collection.name + "_" + selected[0].id + ".json");
-        }
-
-        return app.utils.downloadJSON(selected, `${selected.length}_${props.collection.name}_records.json`);
-    }
-
-    async function deleteSelected() {
-        const idsToDelete = Object.keys(data.bulkSelected);
-        if (!idsToDelete.length) {
-            return; // nothing to delete
-        }
-
-        const remainingIdsToDelete = idsToDelete.slice();
-
-        // delete requests in batches to avoid sending too many requests
-        while (remainingIdsToDelete.length) {
-            const ids = remainingIdsToDelete.splice(0, 100);
-            const promises = [];
-            for (const id of ids) {
-                promises.push(app.pb.collection(props.collection.name).delete(id));
-            }
-            try {
-                await Promise.all(promises);
-            } catch (err) {
-                app.checkApiError(err);
-                selectAll(false);
-                loadRecords(true);
-                return;
-            }
-        }
-
-        selectAll(false);
-
-        app.toasts.success(
-            `Successfully deleted ${idsToDelete.length} ${idsToDelete.length == 1 ? "record" : "records"}.`,
-        );
+        emitBulkSelected(selected);
     }
 
     function recordRid(record) {
@@ -265,7 +217,11 @@ window.app.components.recordsList = function(propsArg = {}) {
                 return;
             }
 
-            delete data.bulkSelected[e.detail.id];
+            if (props.bulkSelected?.[e.detail.id]) {
+                const bulkSelected = JSON.parse(JSON.stringify(props.bulkSelected));
+                delete bulkSelected[e.detail.id];
+                emitBulkSelected(bulkSelected);
+            }
             app.utils.removeByKey(data.records, "id", e.detail.id);
 
             clearTimeout(deleteRefreshTimeoutId);
@@ -299,6 +255,7 @@ window.app.components.recordsList = function(propsArg = {}) {
                             );
 
                             if (oldId && oldId != newId) {
+                                emitBulkSelected({});
                                 clearList();
                             }
                         },
@@ -534,17 +491,16 @@ window.app.components.recordsList = function(propsArg = {}) {
                                     t.input({
                                         type: "checkbox",
                                         id: () => uniqueId + record.id,
-                                        checked: () => !!data.bulkSelected[record.id],
+                                        checked: () => !!props.bulkSelected?.[record.id],
                                         onchange: (e) => {
-                                            const bulkSelected = JSON.parse(JSON.stringify(data.bulkSelected));
+                                            const bulkSelected = JSON.parse(JSON.stringify(props.bulkSelected || {}));
                                             if (e.target.checked) {
                                                 bulkSelected[record.id] = record;
                                             } else {
                                                 delete bulkSelected[record.id];
                                             }
 
-                                            // reassign to trigger the getter's Object.keys
-                                            data.bulkSelected = bulkSelected;
+                                            emitBulkSelected(bulkSelected);
                                         },
                                     }),
                                     t.label({ htmlFor: uniqueId + record.id }),
@@ -615,57 +571,6 @@ window.app.components.recordsList = function(propsArg = {}) {
                             t.span({ className: "txt" }, "Load more"),
                         ),
                     ),
-                ),
-            ),
-        ),
-        t.div(
-            { className: "bulkbar-wrapper" },
-            t.div(
-                {
-                    hidden: () => !data.totalSelected,
-                    className: "bulkbar records-bulkbar",
-                },
-                t.span(
-                    { className: "txt" },
-                    "Selected ",
-                    t.strong(null, () => data.totalSelected),
-                    () => ` ${data.totalSelected == 1 ? "record" : "records"}`,
-                ),
-                t.button(
-                    {
-                        type: "button",
-                        className: "btn sm secondary pill m-r-auto",
-                        onclick: () => selectAll(false),
-                    },
-                    t.span({ className: "txt" }, "Reset"),
-                ),
-                () => {
-                    if (props.collection?.type == "view") {
-                        return;
-                    }
-                    return t.button(
-                        {
-                            type: "button",
-                            className: "btn sm pill outline danger",
-                            onclick: () => {
-                                app.modals.confirm(
-                                    "Do you really want to delete the selected records?",
-                                    deleteSelected,
-                                );
-                            },
-                        },
-                        t.i({ className: "ri-delete-bin-7-line", ariaHidden: true }),
-                        t.span({ className: "txt" }, "Delete"),
-                    );
-                },
-                t.button(
-                    {
-                        type: "button",
-                        className: "btn sm pill",
-                        onclick: () => downloadSelected(),
-                    },
-                    t.i({ className: "ri-download-line", ariaHidden: true }),
-                    t.span({ className: "txt" }, "JSON"),
                 ),
             ),
         ),

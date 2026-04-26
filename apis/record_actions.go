@@ -6,7 +6,6 @@ import (
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
-	"github.com/pocketbase/pocketbase/tools/routine"
 )
 
 func bindRecordActionsApi(_ core.App, rg *router.RouterGroup[*core.RequestEvent]) {
@@ -71,34 +70,12 @@ func recordActionExecute(e *core.RequestEvent) error {
 		return e.BadRequestError(err.Error(), err)
 	}
 
-	if action.ExecutionMode == core.CollectionActionExecutionAsync {
-		job, err := core.EnqueueCollectionActionJob(e.App, collection, action, form.Ids, form.Payload)
-		if err != nil {
-			return e.InternalServerError("Failed to queue the action job.", err)
-		}
-
-		routine.FireAndForget(func() {
-			if err := core.RunCollectionActionJob(e.App, job.Id); err != nil {
-				e.App.Logger().Error("Failed to execute collection action job", "jobId", job.Id, "error", err.Error())
-			}
-		})
-
-		resp := map[string]any{
-			"message":        "Action queued successfully.",
-			"clearSelection": action.ClearSelection,
-			"reloadRecords":  false,
-			"job":            collectionActionJobResponse(job),
-		}
-
-		return e.JSON(http.StatusAccepted, resp)
-	}
-
 	records, err := core.LoadCollectionActionRecords(e.App, collection, action, form.Ids)
 	if err != nil {
 		return e.BadRequestError(err.Error(), err)
 	}
 
-	result, err := core.RunCollectionActionHandler(e.App, collection, action, form.Ids, records, nil, form.Payload)
+	result, err := core.RunCollectionActionHandler(e.App, collection, action, form.Ids, records, form.Payload)
 	if err != nil {
 		return e.BadRequestError("Action failed.", err)
 	}
@@ -114,29 +91,6 @@ func recordActionExecute(e *core.RequestEvent) error {
 	}
 
 	return e.JSON(http.StatusOK, result)
-}
-
-func collectionActionJobResponse(job *core.CollectionActionJob) map[string]any {
-	if job == nil {
-		return nil
-	}
-
-	return map[string]any{
-		"id":             job.Id,
-		"actionName":     job.ActionName,
-		"actionLabel":    job.ActionLabel,
-		"collectionId":   job.CollectionId,
-		"collectionName": job.CollectionName,
-		"status":         job.Status,
-		"processedItems": job.ProcessedItems,
-		"totalItems":     job.TotalItems,
-		"statusMessage":  job.StatusMessage,
-		"error":          job.Error,
-		"started":        job.Started,
-		"finished":       job.Finished,
-		"created":        job.Created,
-		"updated":        job.Updated,
-	}
 }
 
 func collectionActionResponse(action *core.CollectionAction) map[string]any {
@@ -157,7 +111,6 @@ func collectionActionResponse(action *core.CollectionAction) map[string]any {
 		"maxSelection":       action.MaxSelection,
 		"confirmText":        action.ConfirmText,
 		"variant":            action.Variant,
-		"executionMode":      action.ExecutionMode,
 		"loadRecords":        action.LoadRecords,
 		"clearSelection":     action.ClearSelection,
 		"reloadRecords":      action.ReloadRecords,

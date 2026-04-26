@@ -1384,7 +1384,6 @@ func (app *BaseApp) registerBaseHooks() {
 	})
 
 	app.registerSettingsHooks()
-	app.registerCollectionActionHooks()
 	app.registerAutobackupHooks()
 	app.registerCollectionHooks()
 	app.registerRecordHooks()

@@ -88,7 +88,7 @@ declare function cronRemove(jobId: string): void;
  * @group PocketBase
  */
 declare function collectionActionAdd(
-  definition: core.CollectionActionDefinition,
+  definition: { name: string } & Partial<Omit<core.CollectionActionDefinition, "name" | "handler">>,
   handler: (e: core.CollectionActionRequestEvent) => void,
 ): void;
 

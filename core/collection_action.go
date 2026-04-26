@@ -1,18 +1,12 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/tools/hook"
-)
-
-type CollectionActionExecutionMode string
-
-const (
-	CollectionActionExecutionSync  CollectionActionExecutionMode = "sync"
-	CollectionActionExecutionAsync CollectionActionExecutionMode = "async"
 )
 
 // CollectionActionDefinition describes a custom collection admin action.
@@ -35,7 +29,6 @@ type CollectionAction struct {
 	MaxSelection       int
 	ConfirmText        string
 	Variant            string
-	ExecutionMode      CollectionActionExecutionMode
 	LoadRecords        bool
 	ClearSelection     bool
 	ReloadRecords      bool
@@ -48,7 +41,6 @@ type CollectionActionResult struct {
 	Data           any    `json:"data,omitempty"`
 	ClearSelection bool   `json:"clearSelection,omitempty"`
 	ReloadRecords  bool   `json:"reloadRecords,omitempty"`
-	Job            any    `json:"job,omitempty"`
 }
 
 // CollectionActionRequestEvent is passed to custom collection action handlers.
@@ -63,22 +55,10 @@ type CollectionActionRequestEvent struct {
 	RecordIds []string
 	Records   []*Record
 	Payload   map[string]any
-	Job       *CollectionActionJob
 	Result    *CollectionActionResult
 }
 
-func (e *CollectionActionRequestEvent) SetProgress(processedItems, totalItems int, message string) error {
-	if e.Job == nil {
-		return fmt.Errorf("progress updates are only available for async collection action jobs")
-	}
-
-	e.Job.ProcessedItems = processedItems
-	e.Job.TotalItems = totalItems
-	e.Job.StatusMessage = message
-
-	return e.App.AuxSave(e.Job)
-}
-
+// SetResultMessage initializes the action result if needed and sets its message.
 func (e *CollectionActionRequestEvent) SetResultMessage(message string) {
 	if e.Result == nil {
 		e.Result = &CollectionActionResult{}
@@ -132,7 +112,6 @@ func normalizeCollectionAction(action *CollectionAction) error {
 	action.Icon = strings.TrimSpace(action.Icon)
 	action.ConfirmText = strings.TrimSpace(action.ConfirmText)
 	action.Variant = strings.TrimSpace(action.Variant)
-	action.ExecutionMode = CollectionActionExecutionMode(strings.TrimSpace(string(action.ExecutionMode)))
 
 	if action.Name == "" {
 		return fmt.Errorf("action name is required")
@@ -140,16 +119,6 @@ func normalizeCollectionAction(action *CollectionAction) error {
 
 	if action.Label == "" {
 		action.Label = action.Name
-	}
-
-	if action.ExecutionMode == "" {
-		action.ExecutionMode = CollectionActionExecutionSync
-	}
-
-	switch action.ExecutionMode {
-	case CollectionActionExecutionSync, CollectionActionExecutionAsync:
-	default:
-		return fmt.Errorf("invalid action execution mode %q", action.ExecutionMode)
 	}
 
 	if action.MinSelection < 0 {
@@ -161,6 +130,106 @@ func normalizeCollectionAction(action *CollectionAction) error {
 	}
 
 	return nil
+}
+
+// LoadCollectionActionRecords loads the selected records when the action asks for record models.
+func LoadCollectionActionRecords(app App, collection *Collection, action *CollectionAction, ids []string) ([]*Record, error) {
+	if action == nil || !action.LoadRecords {
+		return nil, nil
+	}
+
+	records, err := app.FindRecordsByIds(collection, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(records) != len(ids) {
+		return nil, errors.New("one or more selected records no longer exist")
+	}
+
+	return records, nil
+}
+
+// RunCollectionActionHandler executes a registered collection action handler.
+func RunCollectionActionHandler(
+	app App,
+	collection *Collection,
+	action *CollectionAction,
+	recordIds []string,
+	records []*Record,
+	payload map[string]any,
+) (result map[string]any, err error) {
+	event := &CollectionActionRequestEvent{
+		App: app,
+		baseCollectionEventData: baseCollectionEventData{
+			Collection: collection,
+		},
+		Action:    action,
+		RecordIds: recordIds,
+		Records:   records,
+		Payload:   payload,
+	}
+
+	if action.Handler == nil {
+		return nil, errors.New("missing action handler")
+	}
+
+	if err = action.Handler(event); err != nil {
+		return nil, err
+	}
+
+	if event.Result != nil {
+		return map[string]any{
+			"message":        event.Result.Message,
+			"data":           event.Result.Data,
+			"clearSelection": event.Result.ClearSelection,
+			"reloadRecords":  event.Result.ReloadRecords,
+		}, nil
+	}
+
+	return map[string]any{
+		"message": fmt.Sprintf("%s completed successfully.", action.Label),
+	}, nil
+}
+
+// ValidateCollectionActionSelection checks the selected record ids against an action definition.
+func ValidateCollectionActionSelection(action *CollectionAction, ids []string) error {
+	if action == nil {
+		return errors.New("missing action")
+	}
+
+	if action.SelectionRequired && len(ids) == 0 {
+		return errors.New("at least one selected record is required")
+	}
+
+	if action.MinSelection > 0 && len(ids) < action.MinSelection {
+		return fmt.Errorf("at least %d selected records are required", action.MinSelection)
+	}
+
+	if action.MaxSelection > 0 && len(ids) > action.MaxSelection {
+		return fmt.Errorf("a maximum of %d selected records are allowed", action.MaxSelection)
+	}
+
+	return nil
+}
+
+// NormalizeCollectionActionSelectedIds trims, drops empty values, and removes duplicate selected ids.
+func NormalizeCollectionActionSelectedIds(ids []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+
+	return result
 }
 
 func containsString(values []string, target string) bool {

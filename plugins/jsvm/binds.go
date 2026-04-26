@@ -309,7 +309,6 @@ func parseCollectionActionDefinition(definition goja.Value) (*core.CollectionAct
 		ReloadRecords:      true,
 		ConfirmText:        cast.ToString(defMap["confirmText"]),
 		Variant:            cast.ToString(defMap["variant"]),
-		ExecutionMode:      core.CollectionActionExecutionMode(cast.ToString(defMap["executionMode"])),
 	}
 
 	hasMinSelection := false

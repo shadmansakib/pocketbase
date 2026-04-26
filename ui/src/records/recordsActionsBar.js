@@ -36,9 +36,6 @@ window.app.components.recordsActionsBar = function(propsArg = {}) {
         isLoadingActions: false,
         isExecuting: false,
         actionsRequestKey: "",
-        activeActionJob: null,
-        isLoadingJobs: false,
-        jobsRequestKey: "",
         get selectedIds() {
             return Object.keys(props.bulkSelected || {});
         },
@@ -90,83 +87,6 @@ window.app.components.recordsActionsBar = function(propsArg = {}) {
 
     function resetSelection() {
         clearSelection();
-    }
-
-    function isActiveJob(job) {
-        return job?.status == "queued" || job?.status == "running";
-    }
-
-    function stopJobsPolling() {
-        clearInterval(jobsPollerId);
-        jobsPollerId = undefined;
-    }
-
-    function syncActiveJobFromJobs(jobs) {
-        const activeJobs = Array.isArray(jobs) ? jobs.filter(isActiveJob) : [];
-        data.activeActionJob = activeJobs[0] || null;
-        return activeJobs;
-    }
-
-    function openActiveJobModal() {
-        if (!data.activeActionJob?.id) {
-            return;
-        }
-
-        app.modals.openCollectionActionJob(data.activeActionJob, {
-            oncomplete: (job) => {
-                if (job?.status == "succeeded") {
-                    props.onrefresh?.();
-                }
-                if (job?.status == "failed") {
-                    app.toasts.error(job.error || "The action job failed.");
-                }
-            },
-        });
-    }
-
-    async function loadActiveJobs() {
-        if (!props.collection?.name) {
-            data.activeActionJob = null;
-            data.isLoadingJobs = false;
-            stopJobsPolling();
-            return;
-        }
-
-        data.isLoadingJobs = true;
-        data.jobsRequestKey = "records_action_jobs_" + props.collection.name;
-
-        try {
-            const result = await app.pb.send(
-                "/api/action-jobs?collection=" + encodeURIComponent(props.collection.name) + "&limit=10",
-                {
-                    requestKey: data.jobsRequestKey,
-                },
-            );
-
-            syncActiveJobFromJobs(Array.isArray(result) ? result : []);
-        } catch (err) {
-            if (!err.isAbort) {
-                data.activeActionJob = null;
-                if (err.status && err.status != 404) {
-                    console.warn("[recordsActionsBar] failed to load action jobs:", err);
-                }
-            }
-        }
-
-        data.isLoadingJobs = false;
-        syncJobsPolling();
-    }
-
-    let jobsPollerId;
-
-    function syncJobsPolling() {
-        stopJobsPolling();
-
-        if (data.activeActionJob?.id) {
-            jobsPollerId = setInterval(() => {
-                loadActiveJobs();
-            }, 2500);
-        }
     }
 
     function downloadSelected() {
@@ -269,16 +189,8 @@ window.app.components.recordsActionsBar = function(propsArg = {}) {
 
         if (response?.message) {
             app.toasts.success(response.message);
-        } else if (action.executionMode == "async") {
-            app.toasts.success("Action queued successfully.");
         } else {
             app.toasts.success("Action completed successfully.");
-        }
-
-        if (response?.job?.id) {
-            data.activeActionJob = response.job;
-            syncJobsPolling();
-            openActiveJobModal();
         }
     }
 
@@ -319,16 +231,11 @@ window.app.components.recordsActionsBar = function(propsArg = {}) {
                 if (data.actionsRequestKey) {
                     app.pb.cancelRequest(data.actionsRequestKey);
                 }
-                if (data.jobsRequestKey) {
-                    app.pb.cancelRequest(data.jobsRequestKey);
-                }
 
                 if (newVal && newVal != oldVal) {
                     loadRemoteActions();
-                    loadActiveJobs();
                 } else {
                     data.remoteActions = [];
-                    data.activeActionJob = null;
                 }
             },
         ),
@@ -349,17 +256,12 @@ window.app.components.recordsActionsBar = function(propsArg = {}) {
             className: () => `records-actions-wrapper ${data.totalSelected ? "has-selection" : ""}`,
             onmount: () => {
                 loadRemoteActions();
-                loadActiveJobs();
             },
             onunmount: () => {
                 propWatchers.forEach((w) => w?.unwatch());
                 if (data.actionsRequestKey) {
                     app.pb.cancelRequest(data.actionsRequestKey);
                 }
-                if (data.jobsRequestKey) {
-                    app.pb.cancelRequest(data.jobsRequestKey);
-                }
-                stopJobsPolling();
             },
         },
         t.div(
@@ -398,35 +300,6 @@ window.app.components.recordsActionsBar = function(propsArg = {}) {
                         onclick: () => resetSelection(),
                     },
                     t.span({ className: "txt" }, "Reset"),
-                ),
-                t.button(
-                    {
-                        type: "button",
-                        hidden: () => !data.activeActionJob?.id,
-                        className: () =>
-                            `btn transparent circle records-actions-job-indicator job-${
-                                data.activeActionJob?.status || "unknown"
-                            }${data.isLoadingJobs ? " is-loading" : ""}`,
-                        ariaLabel: app.attrs.tooltip(() => {
-                            const job = data.activeActionJob;
-                            if (!job?.id) {
-                                return "";
-                            }
-                            return `${job.actionLabel || job.actionName}: ${job.status}`;
-                        }),
-                        title: () => {
-                            const job = data.activeActionJob;
-                            if (!job?.id) {
-                                return "";
-                            }
-                            return `${job.actionLabel || job.actionName} - ${job.status}`;
-                        },
-                        onclick: () => openActiveJobModal(),
-                    },
-                    t.i({
-                        className: () => data.isLoadingJobs ? "ri-loader-4-line" : "ri-information-line",
-                        ariaHidden: true,
-                    }),
                 ),
             ),
         ),

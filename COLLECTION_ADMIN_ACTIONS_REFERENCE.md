@@ -2,68 +2,45 @@
 
 This document is the API and behavior reference for the collection admin actions feature.
 
-It describes what changed from the old bulk-action popover, how the new UI works, what backend endpoints were added, and how Go/JS hooks register custom collection actions.
+Collection admin actions are synchronous. PocketBase's JSVM hook runtime does not support Promise-based async handlers, so custom actions run during the action API request and return a normal success or error response.
 
 ## 1. What Changed
 
-Before this feature, the collection list supported only the built-in bulk popover actions for selected records:
+Before this feature, selected records in a collection list opened a small bulk-action popover with:
 
 - `Delete selected`
 - `Export JSON`
 
-The new feature replaces that popover-style bulk UI with a Django-admin-like action bar:
+The feature replaces that popover with a Django-admin-style action bar:
 
-- an actions dropdown
-- a `Go` button
-- a `Reset` button
-- a selected-record counter
-- a modal for async job progress and final status when background execution is used
+- selected-record counter
+- action dropdown
+- `Go` button
+- `Reset` button
 
-The built-in delete/export behavior is preserved, but the UI entry point moved from the popup into the new action bar.
+Built-in delete and export still use the existing client-side behavior. Custom actions are registered by Go code or JS hooks and appear in the same dropdown.
 
 ## 2. UI Behavior
 
-### Placement
-
 The action bar is rendered on the collections page between the search bar and the records list.
 
-### Selection Model
+Actions apply only to explicitly selected records. The UI sends the selected record ids to the backend, and v1 does not support extra action input or intermediate pages.
 
-- Actions apply only to explicitly selected records.
-- Selection is page-scoped and currently follows the records shown in the table.
-- The action bar is disabled until at least one record is selected.
-
-### Built-in Actions
+Built-in actions:
 
 - `Delete selected records`
 - `Export selected records as JSON`
 
-These remain client-side actions.
+Custom actions:
 
-### Custom Actions
-
-Custom actions are loaded from the backend and rendered in the same dropdown.
-
-The UI only passes selected record ids to the backend. There is no extra input form in v1.
-
-### Async Job UI
-
-Async actions create durable job records in the auxiliary database.
-
-The UI opens a dedicated modal for the queued job so the operator can see:
-
-- the action label
-- the current job status
-- processed and total counts
-- the latest status message or error
-
-This keeps the collection toolbar compact while still making async execution visible and easy to follow.
-
-When a background job is still running after the modal is closed, the action bar shows a compact info indicator for that collection scope so the operator can reopen the status modal later.
+- Loaded from `GET /api/collections/{collection}/records/actions`.
+- Executed by `POST /api/collections/{collection}/records/actions/{action}`.
+- Run synchronously and return immediately when the handler completes.
+- May request that the UI clears selection or reloads the records table.
 
 ## 3. Backend API
 
-## 3.1 List Available Actions
+### 3.1 List Available Actions
 
 `GET /api/collections/{collection}/records/actions`
 
@@ -86,7 +63,6 @@ Example response:
     "maxSelection": 0,
     "confirmText": "",
     "variant": "",
-    "executionMode": "sync",
     "loadRecords": true,
     "clearSelection": true,
     "reloadRecords": true
@@ -94,7 +70,7 @@ Example response:
 ]
 ```
 
-## 3.2 Execute an Action
+### 3.2 Execute an Action
 
 `POST /api/collections/{collection}/records/actions/{action}`
 
@@ -107,29 +83,19 @@ Request body:
 }
 ```
 
-Response behavior:
+Successful actions return `200 OK`.
 
-- sync actions return `200 OK`
-- async actions return `202 Accepted`
+Example response:
 
-The response may include:
+```json
+{
+  "message": "Publish selected records completed successfully.",
+  "clearSelection": true,
+  "reloadRecords": true
+}
+```
 
-- `message`
-- `clearSelection`
-- `reloadRecords`
-- `job` for async actions
-
-## 3.3 List Jobs
-
-`GET /api/action-jobs?collection={collection}&status={status}&limit={limit}`
-
-Returns recent action jobs, typically for the current collection.
-
-## 3.4 View a Job
-
-`GET /api/action-jobs/{id}`
-
-Returns a single job record.
+There are no action-job endpoints and no `_action_jobs` persistence table.
 
 ## 4. Hook API
 
@@ -142,14 +108,14 @@ collectionActionRemove(name)
 
 The canonical TypeScript declarations live in
 [plugins/jsvm/internal/types/generated/types.d.ts](./plugins/jsvm/internal/types/generated/types.d.ts).
-The main types are:
+
+Main types:
 
 - `core.CollectionActionDefinition`
 - `core.CollectionActionRequestEvent`
 - `core.CollectionActionResult`
-- `core.CollectionActionJob`
 
-### 4.1 Typed Definition
+### 4.1 Definition Fields
 
 `collectionActionAdd(definition, handler)` accepts `core.CollectionActionDefinition`.
 
@@ -167,24 +133,39 @@ Field | Type | Required | Notes
 `maxSelection` | `number` | no | Enforces a maximum selected count.
 `confirmText` | `string` | no | Optional confirmation message shown before execution.
 `variant` | `string` | no | UI styling hint, like `success` or `warning`.
-`executionMode` | `"sync" \| "async"` | no | Defaults to `sync`.
 `loadRecords` | `boolean` | no | Set this to `true` when the handler needs `e.records`.
 `clearSelection` | `boolean` | no | Requests the UI to clear the selection after success.
 `reloadRecords` | `boolean` | no | Requests the UI to refresh the table after success.
 
-In a `.pb.ts` hook you can annotate the object directly:
+The JSVM parser defaults to:
+
+- `selectionRequired: true`
+- `minSelection: 1`
+- `loadRecords: true`
+- `clearSelection: true`
+- `reloadRecords: true`
+
+### 4.2 TypeScript Example
 
 ```ts
 const publishAction: core.CollectionActionDefinition = {
   name: "publish_posts",
   label: "Publish selected posts",
   collections: ["posts"],
-  executionMode: "sync",
   loadRecords: true,
 }
+
+collectionActionAdd(publishAction, (e) => {
+  for (const record of e.records || []) {
+    record.set("published", true)
+    e.app.save(record)
+  }
+
+  e.setResultMessage("Selected posts were published.")
+})
 ```
 
-In a `.pb.js` hook you can get the same IntelliSense with JSDoc:
+### 4.3 JavaScript Example
 
 ```js
 /** @type {core.CollectionActionDefinition} */
@@ -192,12 +173,20 @@ const publishAction = {
   name: "publish_posts",
   label: "Publish selected posts",
   collections: ["posts"],
-  executionMode: "sync",
   loadRecords: true,
 }
+
+collectionActionAdd(publishAction, function(e) {
+  for (const record of e.records || []) {
+    record.set("published", true)
+    e.app.save(record)
+  }
+
+  e.setResultMessage("Selected posts were published.")
+})
 ```
 
-### 4.2 Event Fields
+### 4.4 Event Fields
 
 The handler receives a `core.CollectionActionRequestEvent` object with:
 
@@ -209,15 +198,13 @@ Field | Type | Notes
 `recordIds` | `string[]` | The selected record ids.
 `records` | `core.Record[] \| undefined` | Loaded only when `loadRecords` is enabled.
 `payload` | `Record<string, any>` | Submitted request payload.
-`job` | `core.CollectionActionJob \| undefined` | Present for async execution.
-`result` | `core.CollectionActionResult \| undefined` | Mutable response data for sync handlers.
+`result` | `core.CollectionActionResult \| undefined` | Mutable response data.
 
-The event also exposes helper methods:
+The event also exposes:
 
-- `setProgress(processedItems, totalItems, message)` for async jobs
 - `setResultMessage(message)`
 
-### 4.3 Result and Job Shapes
+### 4.5 Result Shape
 
 `core.CollectionActionResult` may include:
 
@@ -225,81 +212,38 @@ The event also exposes helper methods:
 - `data`
 - `clearSelection`
 - `reloadRecords`
-- `job`
 
-`core.CollectionActionJob` is the durable async job record returned by the API and shown in the modal. It includes:
+Handlers can either set `e.result` directly or call `e.setResultMessage(...)`.
 
-- `id`
-- `actionName`
-- `actionLabel`
-- `collectionId`
-- `collectionName`
-- `status`
-- `recordIds`
-- `payload`
-- `result`
-- `error`
-- `processedItems`
-- `totalItems`
-- `statusMessage`
-- `started`
-- `finished`
-- `created`
-- `updated`
+## 5. Execution Contract
 
-## 5. Execution Modes
+All custom actions run synchronously.
 
-### `sync`
+Guidelines:
 
-- runs immediately during the API request
-- best for quick, deterministic updates
-- should be used when the action completes in a short time
+- Keep handlers quick and deterministic.
+- Use `loadRecords: false` if the action only needs selected ids.
+- Use `e.app.runInTransaction(...)` for grouped writes.
+- Use the transaction callback app, not the outer app, inside transactions.
+- For long-running work, register a separate job/cron/queue feature outside collection actions and let the action only trigger or mark that work.
 
-### `async`
+## 6. Built-in Example Hooks
 
-- enqueues a durable job in `_action_jobs`
-- runs in the background
-- suitable for longer operations or actions that should survive restarts
+The example app includes selected-record actions in `examples/base/pb_hooks`:
 
-## 6. Example Collection: `posts`
+- publish selected shopping items
+- unpublish selected shopping items
+- mark selected posts pending
+- approve selected posts
 
-For the following collection schema:
+All examples are synchronous and should omit `executionMode`.
 
-- collection name: `posts`
-- status field: select with values `pending` and `approved`
+## 7. Files
 
-the recommended example hooks are:
-
-- a sync action that sets selected posts to `pending`
-- an async action that sets selected posts to `approved`
-- a sync action that sets selected posts as published
-- a sync action that sets selected posts as unpublished
-
-## 7. Behavioral Differences From The Old Bulk Popup
-
-- The old popup was action-specific and modal-like.
-- The new UI is always visible as part of the collection toolbar area.
-- The old UI had no hook-driven custom action registry.
-- The new feature supports Go and JS hook registration.
-- The old UI had no durable async job model.
-- The new feature can show action jobs and recover interrupted background work.
-
-## 8. Implementation Notes
-
-- Built-in delete/export remain client-side to preserve their current behavior.
-- Custom actions are backend-driven.
-- The UI currently passes selected ids only.
-- There is no extra parameter form yet.
-- Async actions should be used when the work may take long enough to degrade the request/response flow.
-- Async job status is shown in a modal instead of an inline “recent jobs” strip to keep the page layout clean.
-
-## 9. File References
-
-- UI action bar: [ui/src/records/recordsActionsBar.js](./ui/src/records/recordsActionsBar.js)
-- Collection page integration: [ui/src/collections/pageCollections.js](./ui/src/collections/pageCollections.js)
 - Backend action API: [apis/record_actions.go](./apis/record_actions.go)
-- Job API: [apis/action_jobs.go](./apis/action_jobs.go)
-- Collection action core types: [core/collection_action.go](./core/collection_action.go)
-- Async job model: [core/collection_action_job.go](./core/collection_action_job.go)
-- JS hook binding: [plugins/jsvm/binds.go](./plugins/jsvm/binds.go)
-- Example hooks: [examples/base/pb_hooks/collection_admin_actions.pb.js](./examples/base/pb_hooks/collection_admin_actions.pb.js)
+- Registry and event types: [core/collection_action.go](./core/collection_action.go)
+- Registry implementation: [core/collection_action_registry.go](./core/collection_action_registry.go)
+- JS hook bindings: [plugins/jsvm/binds.go](./plugins/jsvm/binds.go)
+- TypeScript declarations: [plugins/jsvm/internal/types/generated/types.d.ts](./plugins/jsvm/internal/types/generated/types.d.ts)
+- UI action bar: [ui/src/records/recordsActionsBar.js](./ui/src/records/recordsActionsBar.js)
+

@@ -69,13 +69,18 @@ Notes:
 
 ## 2. Quick Start
 
+Unless a section explicitly says otherwise, run Go commands from the project root.
+
 ### Backend only
 
 Use this when you want to run PocketBase with the embedded admin UI bundle from `ui/dist`.
 
 ```sh
-cd examples/base
-go run main.go serve --dev
+go run ./examples/base serve --dev \
+  --dir ./examples/base/pb_data \
+  --hooksDir ./examples/base/pb_hooks \
+  --migrationsDir ./examples/base/pb_migrations \
+  --publicDir ./examples/base/pb_public
 ```
 
 Open: `http://127.0.0.1:8090`
@@ -83,8 +88,7 @@ Open: `http://127.0.0.1:8090`
 Notes:
 
 - `--dev` enables dev mode logging and SQL output.
-- Run this command from `examples/base`, not from the repo root.
-- When started with `go run`, PocketBase uses the current working directory for defaults, so running from `examples/base` keeps `pb_data`, `pb_public`, `pb_hooks`, and `pb_migrations` in the expected place.
+- The explicit path flags keep `pb_data`, `pb_public`, `pb_hooks`, and `pb_migrations` in `examples/base` even though the command is run from the project root.
 - The UI served at `:8090` is the built bundle from `ui/dist`. It does not hot reload.
 - Changes in `ui/src` will not appear here until you rebuild the frontend bundle with `cd ui && npm run build`.
 
@@ -95,8 +99,11 @@ Use two terminals.
 Terminal 1:
 
 ```sh
-cd examples/base
-go run main.go serve --dev
+go run ./examples/base serve --dev \
+  --dir ./examples/base/pb_data \
+  --hooksDir ./examples/base/pb_hooks \
+  --migrationsDir ./examples/base/pb_migrations \
+  --publicDir ./examples/base/pb_public
 ```
 
 Terminal 2:
@@ -188,7 +195,7 @@ ui/index.html
 
 ## 6. Common Local Directories
 
-When you run from `examples/base`, these are the important local directories:
+These are the important local directories for the example app:
 
 | Path | Purpose |
 | --- | --- |
@@ -199,7 +206,7 @@ When you run from `examples/base`, these are the important local directories:
 
 Default behavior comes from:
 
-- `pocketbase.New()` using the current working directory during `go run`
+- `pocketbase.New()` using the configured `--dir` and plugin directory flags
 - `examples/base/main.go` registering JS hooks, migrations, and public directory support
 
 ## 7. Useful Backend Flags
@@ -207,8 +214,11 @@ Default behavior comes from:
 Common flags while running the example app:
 
 ```sh
-cd examples/base
-go run main.go serve --dev --dir ./pb_data
+go run ./examples/base serve --dev \
+  --dir ./examples/base/pb_data \
+  --hooksDir ./examples/base/pb_hooks \
+  --migrationsDir ./examples/base/pb_migrations \
+  --publicDir ./examples/base/pb_public
 ```
 
 Useful flags:
@@ -285,122 +295,127 @@ That command runs `dprint fmt` before the Vite build.
 
 ## 11. Building
 
-### Build the example backend executable
+PocketBase builds as a terminal CLI executable, not a macOS Finder `.app` bundle.
+
+On macOS, a correct build is usually shown by Finder as a Unix executable and by `file` as a Mach-O executable. You run it from the terminal, for example:
 
 ```sh
-cd examples/base
-go build
+.builds/pocketbase serve
 ```
 
-This produces a local `base` executable that behaves like the repo's example standalone app.
+Build from the repo root and explicitly target `./examples/base`.
 
-Notes:
+Do not run a bare `go build -o .builds/pocketbase` from the repo root when you want a runnable PocketBase server. The repo root is the library package, while `examples/base` is the standalone `main` package used for executable builds. A bare repo-root build can produce a package archive that Finder may show as a generic document instead of a Unix executable.
 
-- By default, `go build` writes the binary into the current directory.
-- On macOS and Linux, the default output file name is `base`.
-- On Windows, the default output file name is `base.exe`.
-- If you want a custom output name or location, pass `-o`.
-- For release artifacts in this repo, prefer the gitignored `/.builds/` directory.
-- After a successful build, verify the output with `file`. On macOS you should see something like `Mach-O 64-bit executable`, not `current ar archive`.
-- If the target file already exists and `file` reports an archive or something unexpected, remove the stale file and rebuild.
+### Development CLI build
 
-### macOS executable build
-
-Use this command from `examples/base` when you want a production-style executable on macOS:
+Use this when you want a quick local binary with normal debug metadata:
 
 ```sh
-mkdir -p ../../.builds
-go build -trimpath -ldflags="-s -w -buildid=" -o ../../.builds/pocketbase
+mkdir -p .builds
+go build -o .builds/pocketbase ./examples/base
 ```
 
-This writes the executable to `../../.builds/pocketbase` relative to `examples/base`.
-If you need to troubleshoot build-cache permissions, prefix the command with `GOCACHE=/tmp/pocketbase-gocache`.
-After building, verify it with:
+Verify the output from the repo root:
 
 ```sh
-file ../../.builds/pocketbase
+file .builds/pocketbase
+.builds/pocketbase --help
 ```
 
-Example:
+On Apple Silicon macOS, `file` should print something like:
+
+```text
+.builds/pocketbase: Mach-O 64-bit executable arm64
+```
+
+On Intel macOS, it should say `x86_64` instead of `arm64`.
+
+Run the built development binary from the project root. Because the executable lives in `.builds`, always pass the local runtime directories explicitly:
 
 ```sh
-cd examples/base
-go build -o ../../.builds/pocketbase
+.builds/pocketbase serve --dev \
+  --dir ./examples/base/pb_data \
+  --hooksDir ./examples/base/pb_hooks \
+  --migrationsDir ./examples/base/pb_migrations \
+  --publicDir ./examples/base/pb_public
 ```
 
-That creates `.builds/pocketbase` at the repo root on macOS and Linux, or `.builds/pocketbase.exe` on Windows.
+### Production CLI build
 
-### Cross-compile a static binary
-
-```sh
-cd examples/base
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build
-```
-
-### Build frontend bundle for embedding
+Build the frontend bundle first if the release should include the latest embedded admin UI:
 
 ```sh
 cd ui
 npm run build
 ```
 
-Do this whenever you want the Go app to serve the updated embedded admin UI.
-
-### Build without bundling the UI
+Then return to the project root and build the standalone CLI executable:
 
 ```sh
-cd examples/base
-go build -tags no_ui
+cd ..
+mkdir -p .builds
+go build -trimpath -ldflags="-s -w -buildid=" -o .builds/pocketbase ./examples/base
+```
+
+Command breakdown:
+
+- `go build`: compile a Go package.
+- `-trimpath`: remove local filesystem paths from compiled package metadata.
+- `-ldflags="-s -w -buildid="`: pass linker flags that strip symbol/debug tables and clear the Go build id.
+- `-o .builds/pocketbase`: write the output binary to the gitignored `.builds` directory.
+- `./examples/base`: build the standalone PocketBase `main` package, not the repo-root library package.
+
+Verify the production output from the repo root:
+
+```sh
+file .builds/pocketbase
+.builds/pocketbase --version
+.builds/pocketbase --help
+```
+
+Run it from the project root with explicit local runtime paths:
+
+```sh
+.builds/pocketbase serve \
+  --dir ./examples/base/pb_data \
+  --hooksDir ./examples/base/pb_hooks \
+  --migrationsDir ./examples/base/pb_migrations \
+  --publicDir ./examples/base/pb_public
+```
+
+If the local Go cache is not writable, use a temporary cache path:
+
+```sh
+GOCACHE=/tmp/pocketbase-gocache go build -trimpath -ldflags="-s -w -buildid=" -o .builds/pocketbase ./examples/base
+```
+
+### Backend-only build without embedded UI
+
+```sh
+mkdir -p .builds
+go build -tags no_ui -o .builds/pocketbase-no-ui ./examples/base
 ```
 
 With the `no_ui` build tag, `ui/embed_no_ui.go` is used and the admin UI is not embedded in the binary.
 
-### Production build guidance
-
-For a production release, prefer a trimmed binary with no local source paths in the debug metadata:
+### Cross-compile a static Linux binary
 
 ```sh
-cd examples/base
-go build -trimpath -ldflags="-s -w -buildid="
+mkdir -p .builds
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -o .builds/pocketbase-linux-amd64 ./examples/base
 ```
 
-That writes the binary into `examples/base` using the default output name unless you pass `-o`.
-For production artifacts, prefer writing into `.builds/` instead:
+### Build notes
 
-```sh
-cd examples/base
-mkdir -p ../../.builds
-go build -trimpath -ldflags="-s -w -buildid=" -o ../../.builds/pocketbase
-```
-
-If you want to ship the admin UI inside the binary, build the frontend bundle first:
-
-```sh
-cd ui
-npm run build
-cd ../examples/base
-go build -trimpath -ldflags="-s -w -buildid="
-```
-
-You can also combine the production flags with a custom output name:
-
-```sh
-cd examples/base
-mkdir -p ../../.builds
-go build -trimpath -ldflags="-s -w -buildid=" -o ../../.builds/pocketbase
-```
-
-If you want a backend-only binary with no embedded admin UI, build with the `no_ui` tag:
-
-```sh
-cd examples/base
-go build -trimpath -ldflags="-s -w -buildid=" -tags no_ui
-```
-
-Notes:
-
-- `-trimpath` removes local filesystem paths from the compiled package metadata and panic/debug output.
-- `-ldflags="-s -w -buildid="` strips symbol and DWARF tables and clears the build id string.
+- By default, `go build` writes the binary into the current directory and names it after the package directory.
+- From `examples/base`, the default output name is `base` on macOS/Linux and `base.exe` on Windows.
+- For repo-local artifacts, use the gitignored `/.builds/` directory with `-o .builds/pocketbase` from the repo root.
+- Always include `./examples/base` in repo-root build commands so Go builds the executable `main` package.
+- The production command is the same executable build as the development command, with extra path-trimming and linker-stripping flags.
+- A macOS `.app` bundle is not produced by these commands. That requires separate app packaging/signing work and is not how PocketBase is normally distributed.
+- If Finder shows the output as a generic document or `file` reports `current ar archive`, you built the wrong package or are inspecting a stale/wrong output file. Remove that output and rebuild from the repo root with `go build ... ./examples/base`.
+- If `file` reports `Mach-O 64-bit executable` but Finder still labels it generically, trust `file` and run it from the terminal. Finder labels are not the source of truth for Go CLI binaries.
 - These flags help reduce the amount of machine-specific information visible in a decompiled or inspected binary.
 - They do not remove strings that you hardcode into Go code, JS hooks, templates, HTML, or the embedded frontend bundle.
 - For that reason, never put secrets, private URLs, API keys, passwords, or absolute development paths directly into source files that are compiled or embedded.
@@ -408,7 +423,6 @@ Notes:
 - If you ship the embedded UI, inspect `ui/dist` before release and make sure it does not contain development-only values from your local `.env` files.
 - Use the `no_ui` build tag if you intentionally do not want any admin UI assets embedded in the release binary.
 - Keep `pb_hooks` and `pb_migrations` free of machine-specific paths, test credentials, or throwaway debugging strings before publishing a build.
-- If your local Go cache path is not writable, set `GOCACHE=/tmp/pocketbase-gocache` for the build command.
 
 When not to use the production flags:
 
@@ -420,7 +434,7 @@ When not to use the production flags:
 
 The example app enables both JS hooks and JS migrations through `plugins/jsvm` and `plugins/migratecmd`.
 
-Defaults when running from `examples/base`:
+Defaults if you run from `examples/base` without explicit flags:
 
 - hooks dir: `./pb_hooks`
 - migrations dir: `./pb_migrations`
@@ -430,10 +444,9 @@ Defaults when running from `examples/base`:
 Useful command examples:
 
 ```sh
-cd examples/base
-go run main.go migrate up
-go run main.go migrate create add_example_field
-go run main.go migrate collections
+go run ./examples/base migrate up --migrationsDir ./examples/base/pb_migrations
+go run ./examples/base migrate create add_example_field --migrationsDir ./examples/base/pb_migrations
+go run ./examples/base migrate collections --migrationsDir ./examples/base/pb_migrations
 ```
 
 ## 13. Recommended Daily Workflow
@@ -441,8 +454,11 @@ go run main.go migrate collections
 ### Backend-focused work
 
 ```sh
-cd examples/base
-go run main.go serve --dev
+go run ./examples/base serve --dev \
+  --dir ./examples/base/pb_data \
+  --hooksDir ./examples/base/pb_hooks \
+  --migrationsDir ./examples/base/pb_migrations \
+  --publicDir ./examples/base/pb_public
 ```
 
 Use the embedded UI at `http://127.0.0.1:8090`.
@@ -452,8 +468,11 @@ Use the embedded UI at `http://127.0.0.1:8090`.
 Terminal 1:
 
 ```sh
-cd examples/base
-go run main.go serve --dev
+go run ./examples/base serve --dev \
+  --dir ./examples/base/pb_data \
+  --hooksDir ./examples/base/pb_hooks \
+  --migrationsDir ./examples/base/pb_migrations \
+  --publicDir ./examples/base/pb_public
 ```
 
 Terminal 2:
@@ -481,7 +500,7 @@ Then restart the backend if you want to verify the embedded UI version at `:8090
 
 ## 15. Common Gotchas
 
-- If you run `go run ./examples/base/main.go serve` from the repo root, your default relative paths will resolve from the root, not `examples/base`.
+- If you run the example app from the repo root without `--dir`, `--hooksDir`, `--migrationsDir`, and `--publicDir`, default relative paths will resolve from the root, not `examples/base`.
 - If you only run the backend, you are testing the embedded `ui/dist` bundle, not the live Vite frontend.
 - If you forget `npm run build`, the backend may still serve an old embedded UI.
 - There is no built-in Go hot reload in this repo.
@@ -497,15 +516,10 @@ make test
 make test-report
 make lint
 make jstypes
-```
-
-From `examples/base`:
-
-```sh
-go run main.go serve --dev
-go run main.go migrate up
-go build
-go build -tags no_ui
+go run ./examples/base serve --dev --dir ./examples/base/pb_data --hooksDir ./examples/base/pb_hooks --migrationsDir ./examples/base/pb_migrations --publicDir ./examples/base/pb_public
+go run ./examples/base migrate up --migrationsDir ./examples/base/pb_migrations
+go build -o .builds/pocketbase ./examples/base
+go build -tags no_ui -o .builds/pocketbase-no-ui ./examples/base
 ```
 
 From `ui`:
